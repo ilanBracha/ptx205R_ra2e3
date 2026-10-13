@@ -1,0 +1,28 @@
+# e² studio / Eclipse build output
+Debug/
+Release/
+*_Debug/
+*_Release/
+
+# JLink logs
+*.log
+*.jlink
+
+# Eclipse workspace metadata
+.settings/language.settings.xml
+
+# FSP generated files (optional — uncomment to exclude)
+ra/
+ra_cfg/
+ra_gen/
+
+bsp_linker_info.h
+.secure_*
+.api_xml
+memory_regions.lld
+
+# OS files
+.DS_Store
+Thumbs.db
+
+Debug-SPI-NONE/
