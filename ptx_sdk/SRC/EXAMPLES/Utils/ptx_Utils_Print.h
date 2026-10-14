@@ -115,6 +115,11 @@ void ptx_Utils_Print_Buffer(uint8_t *buffer, uint16_t bufferLength, uint8_t addN
  */
 uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize);
 
+/**
+ * \brief Returns 1 if any key was pressed on the UART terminal since the last call (input is discarded), else 0.
+ */
+uint8_t ptx_Utils_Cli_AnyKey(void);
+
 /*
  * Temporary bring-up debug prints (UART). Enabled by default on MCU builds;
  * add PTX_DEBUG_PRINTS_DISABLE to the compiler defines to remove them (and their flash cost).

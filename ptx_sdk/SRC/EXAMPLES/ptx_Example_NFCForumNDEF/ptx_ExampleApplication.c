@@ -86,6 +86,8 @@
 #include "ptx_NDEF_T3T.h"
 #include "ptx_NDEF_T4T.h"
 #include "ptx_NDEF_T5T.h"
+#include "ptx_RUL_HCE.h"
+#include "ptx_HCET4T.h"
 #include <string.h>
 #include <stdio.h>
 #if defined(PTX_APP_DIVERSITY_WINDOWS)
@@ -235,6 +237,11 @@ typedef struct ptx_DemoApplication_ExchangeParams
 static char     gPendingText[PTX_DEMO_NDEF_TEXT_MAX + 1u];
 static uint32_t gPendingTextLen = 0;
 
+/* TAG mode (card emulation): text to present, request flag set by the "tag" command. */
+static char     gTagText[PTX_DEMO_NDEF_TEXT_MAX + 1u];
+static uint32_t gTagTextLen = 0;
+static uint8_t  gTagRequested = 0;
+
 #define PTX_DEMO_CLI_PROMPT             "$ nfc > "
 
 static void ptx_Demo_CliPrompt(void)
@@ -244,7 +251,7 @@ static void ptx_Demo_CliPrompt(void)
 
 static void ptx_Demo_CliHelp(void)
 {
-    ptx_Utils_Print("CLI: write <text> | cancel | status | help\n");
+    ptx_Utils_Print("CLI: write <text> | tag <text> | cancel | status | help\n");
 }
 
 static void ptx_Demo_CliPoll(void)
@@ -267,7 +274,24 @@ static void ptx_Demo_CliPoll(void)
                 (void)memcpy(gPendingText, text, len);
                 gPendingText[len] = '\0';
                 gPendingTextLen = len;
-                ptx_Utils_Print("Armed: \"%s\" - present a tag to write\n", gPendingText);
+                ptx_Utils_Print("Armed: \"%s\"\n", gPendingText);
+            }
+            else
+            {
+                ptx_Utils_Print("Text must be 1..%u chars\n", (uint32_t)PTX_DEMO_NDEF_TEXT_MAX);
+            }
+        }
+        else if ((0 == strncmp(line, "tag ", 4)) || (0 == strncmp(line, "TAG ", 4)))
+        {
+            const char *text = &line[4];
+            uint32_t len = (uint32_t)strlen(text);
+
+            if ((0u != len) && (len <= PTX_DEMO_NDEF_TEXT_MAX))
+            {
+                (void)memcpy(gTagText, text, len);
+                gTagText[len] = '\0';
+                gTagTextLen = len;
+                gTagRequested = 1u;
             }
             else
             {
@@ -287,7 +311,7 @@ static void ptx_Demo_CliPoll(void)
             }
             else
             {
-                ptx_Utils_Print("No pending write (read mode)\n");
+                ptx_Utils_Print("No pending write\n");
             }
         }
         else
@@ -296,6 +320,70 @@ static void ptx_Demo_CliPoll(void)
         }
 
         ptx_Demo_CliPrompt();
+    }
+}
+
+/*
+ * Prints every record of an NDEF message: record number, type (1-char types like T/U shown) and payload as text.
+ * Text records are shown without status byte / language code. Non-printable bytes are shown as '.'.
+ */
+static void ptx_Demo_PrintNdef(const uint8_t *msg, uint32_t len)
+{
+    uint32_t pos = 0;
+    uint32_t rec = 0;
+
+    while ((pos + 3u) <= len)
+    {
+        uint8_t  hdr      = msg[pos++];                         /* MB ME CF SR IL TNF */
+        uint32_t type_len = msg[pos++];
+        uint32_t pay_len;
+        uint32_t id_len   = 0;
+
+        if (0u != (hdr & 0x10u))
+        {
+            pay_len = msg[pos++];                               /* short record: 1 byte payload length */
+        }
+        else
+        {
+            if ((pos + 4u) > len)
+            {
+                break;
+            }
+            pay_len = ((uint32_t)msg[pos] << 24) | ((uint32_t)msg[pos + 1u] << 16) | ((uint32_t)msg[pos + 2u] << 8) | (uint32_t)msg[pos + 3u];
+            pos += 4u;
+        }
+        if ((0u != (hdr & 0x08u)) && (pos < len))
+        {
+            id_len = msg[pos++];
+        }
+
+        uint32_t type_pos = pos;
+        uint32_t start    = pos + type_len + id_len;
+        uint32_t end      = ((start + pay_len) > len) ? len : (start + pay_len);
+
+        if ((0x01u == (hdr & 0x07u)) && (1u == type_len) && ((uint8_t)'T' == msg[type_pos]) && (start < end))
+        {
+            start += 1u + (uint32_t)(msg[start] & 0x3Fu);       /* Text record: skip status byte + language code */
+        }
+
+        ptx_Utils_Print("NDEF[%u] %c: \"", rec, ((1u == type_len) && (type_pos < len)) ? (int)msg[type_pos] : (int)'?');
+        for (uint32_t i = start; i < end; i++)
+        {
+            ptx_Utils_Print("%c", ((msg[i] >= 0x20u) && (msg[i] < 0x7Fu)) ? (int)msg[i] : (int)'.');
+        }
+        ptx_Utils_Print("\"\n");
+
+        rec++;
+        pos = end;
+        if (0u != (hdr & 0x40u))
+        {
+            break;                                              /* ME: last record */
+        }
+    }
+
+    if (0u == rec)
+    {
+        ptx_Utils_Print("NDEF: %u bytes (not parsed)\n", len);
     }
 }
 
@@ -319,6 +407,161 @@ static uint32_t ptx_Demo_BuildTextNdef(uint8_t *buffer, uint32_t bufferSize, con
     }
 
     return msg_len;
+}
+
+/*
+ * ####################################################################################################################
+ * TAG MODE - card emulation of an NFC Forum Type 4 Tag (ISO-DEP, NFC-A) holding one NDEF Text record.
+ * Uses the SDK Host Card Emulation component (RUL_HCE) and the T4T emulation helper (HCE_T4T example module).
+ * ####################################################################################################################
+ */
+#define PTX_DEMO_TAG_NDEF_FILE_SIZE     (256u)      /* = max. NDEF file size announced in the CC file (0x0100) */
+#define PTX_DEMO_TAG_BUFFER_SIZE        (256u)      /* HCE Rx (C-APDU) / Tx (R-APDU) buffers, MLe/MLc = 128 */
+#define PTX_DEMO_TAG_NFCID_LEN          (4u)
+#define PTX_DEMO_TAG_ATS_LEN            (5u)
+
+static ptx_RUL_HCE_t gTagHce;
+static ptx_HCET4T_t  gTagT4t;
+static uint8_t       gTagRxBuffer[PTX_DEMO_TAG_BUFFER_SIZE];
+static uint8_t       gTagTxBuffer[PTX_DEMO_TAG_BUFFER_SIZE];
+static uint8_t       gTagNdefFile[PTX_DEMO_TAG_NDEF_FILE_SIZE];
+
+/* Capability Container: CCLEN=15, mapping v2.0, MLe=0x0080, MLc=0x0080,
+ * NDEF File Control TLV: file ID E104, max. NDEF size 0x0100, read access 00 (free), write access FF (read-only). */
+static uint8_t       gTagCcFile[15] = { 0x00, 0x0F, 0x20, 0x00, 0x80, 0x00, 0x80, 0x04, 0x06, 0xE1, 0x04, 0x01, 0x00, 0x00, 0xFF };
+
+static ptx_Status_t ptx_Demo_RunTagMode(ptx_RUL_t *rul)
+{
+    static const uint8_t nfc_id[PTX_DEMO_TAG_NFCID_LEN]          = { 0x08, 0x01, 0x02, 0x03 };     /* 0x08 = random-ID marker */
+    static const uint8_t sens_res[PTX_RUL_SENSRES_LEN] = { 0x01, 0x00 };
+    static const uint8_t iso_dep_ats[PTX_DEMO_TAG_ATS_LEN]        = { 0x05, 0x78, 0x00, 0x71, 0x02 };
+
+    ptx_Status_t status;
+    ptx_RUL_DeactivateParams_t deact_params = {0};
+    ptx_RUL_HCE_InitParams_t hce_init = {0};
+    ptx_HCET4T_InitParams_t t4t_init = {0};
+    ptx_RUL_DiscoverConfig_t disc_config;
+    ptx_RUL_HCE_EventRecord_t *record = NULL;
+
+    gTagRequested = 0u;
+
+    /* NDEF file = 2 byte NLEN (big endian) + NDEF message (one Text record). */
+    (void)memset(gTagNdefFile, 0, sizeof(gTagNdefFile));
+    uint32_t msg_len = ptx_Demo_BuildTextNdef(&gTagNdefFile[2], (uint32_t)sizeof(gTagNdefFile) - 2u, gTagText, gTagTextLen);
+    gTagNdefFile[0] = (uint8_t)((msg_len >> 8) & 0xFFu);
+    gTagNdefFile[1] = (uint8_t)(msg_len & 0xFFu);
+
+    /* Stop the reader (polling loop) first. */
+    deact_params.Type  = ptx_RUL_DeactivateType_Generic;
+    deact_params.State = ptx_RUL_DeactivateState_Idle;
+    status = ptx_RUL_Deactivate(rul, &deact_params);
+
+    if (PTX_STATUS_SUCCESS == status)
+    {
+        hce_init.AppRxBuffer     = gTagRxBuffer;
+        hce_init.AppRxBufferSize = (uint32_t)sizeof(gTagRxBuffer);
+        hce_init.Rul             = rul;
+        hce_init.Log             = &rul->Log;
+        status = ptx_RUL_HCE_Init(&gTagHce, &hce_init);
+    }
+
+    if (PTX_STATUS_SUCCESS == status)
+    {
+        t4t_init.CCFile       = gTagCcFile;
+        t4t_init.CCFileSize   = (uint32_t)sizeof(gTagCcFile);
+        t4t_init.NDEFFile     = gTagNdefFile;
+        t4t_init.NDEFFileSize = (uint32_t)sizeof(gTagNdefFile);
+        status = ptx_HCET4T_Init(&gTagT4t, &t4t_init);
+    }
+
+    if (PTX_STATUS_SUCCESS == status)
+    {
+        /* Listen-only discovery: NFC-A + ISO-DEP (Type 4 Tag), RF-field notifications enabled. */
+        (void)memset(&disc_config, 0, sizeof(disc_config));
+        disc_config.ListenMode            = 3u;
+        disc_config.ListenTypeA           = 1u;
+        disc_config.ListenIsoDep          = 1u;
+        disc_config.ListenTypeANfcIdLen   = (uint8_t)PTX_DEMO_TAG_NFCID_LEN;
+        (void)memcpy(disc_config.ListenTypeANfcId, nfc_id, PTX_DEMO_TAG_NFCID_LEN);
+        disc_config.ListenTypeASensResLen = (uint8_t)PTX_RUL_SENSRES_LEN;
+        (void)memcpy(disc_config.ListenTypeASensRes, sens_res, PTX_RUL_SENSRES_LEN);
+        disc_config.ListenIsoDepAtsLen    = (uint8_t)PTX_DEMO_TAG_ATS_LEN;
+        (void)memcpy(disc_config.ListenIsoDepAts, iso_dep_ats, PTX_DEMO_TAG_ATS_LEN);
+        status = ptx_RUL_InitiateDiscovery(rul, &disc_config);
+    }
+
+    if (PTX_STATUS_SUCCESS == status)
+    {
+        ptx_Utils_Print("TAG \"%s\" (any key: exit)\n", gTagText);
+        ptx_Demo_LedSet(PTX_DEMO_LED_CARD, 1u);
+        (void)ptx_Utils_Cli_AnyKey();                       /* drop keys typed before TAG mode started */
+    }
+    else
+    {
+        ptx_Utils_Print("TAG start failed: %04X\n", status);
+    }
+
+    while ((PTX_STATUS_SUCCESS == status) && (0u == ptx_Utils_Cli_AnyKey()))
+    {
+        status = ptx_RUL_HCE_GetEvent(&gTagHce, &record);
+
+        if ((PTX_STATUS_SUCCESS == status) && (NULL != record))
+        {
+            switch (record->EventID)
+            {
+                case RUL_HCE_EventType_ExtFieldOn:
+                case RUL_HCE_EventType_ExtFieldOff:
+                    status = ptx_HCET4T_Reset(&gTagT4t);
+                    break;
+
+                case RUL_HCE_EventType_Activated:
+                    ptx_Utils_Print("TAG: read start\n");
+                    break;
+
+                case RUL_HCE_EventType_Data:
+                {
+                    uint32_t tx_len = (uint32_t)sizeof(gTagTxBuffer);
+                    status = ptx_HCET4T_CommandProcess(&gTagT4t, record->RxMsgData, record->RxMsgDataLen, gTagTxBuffer, &tx_len);
+                    if ((PTX_STATUS_SUCCESS == status) && (0u != tx_len))
+                    {
+                        status = ptx_RUL_HCE_SendData(&gTagHce, gTagTxBuffer, tx_len);
+                    }
+                    break;
+                }
+
+                case RUL_HCE_EventType_Deactivated:
+                    ptx_Utils_Print("TAG: read end\n");
+                    break;
+
+                case RUL_HCE_EventType_Error:
+                    /* RF error (e.g. reader moved away) - keep emulating. */
+                    break;
+
+                case RUL_HCE_EventType_NoEvent:
+                default:
+                    break;
+            }
+        }
+
+        if (PTX_STATUS_E_GEN_NOT_FOUND == status)
+        {
+            status = PTX_STATUS_SUCCESS;                    /* no event pending */
+        }
+    }
+
+    if (PTX_STATUS_SUCCESS != status)
+    {
+        ptx_Utils_Print("TAG error: %04X\n", status);
+    }
+
+    /* Back to reader mode: stop listening, release HCE / T4T emulation. */
+    (void)ptx_RUL_Deactivate(rul, &deact_params);
+    (void)ptx_HCET4T_DeInit(&gTagT4t);
+    (void)ptx_RUL_HCE_DeInit(&gTagHce);
+    ptx_Demo_LedSet(PTX_DEMO_LED_CARD, 0u);
+    ptx_Utils_Print("Reader mode\n");
+
+    return status;
 }
 
 /*
@@ -483,19 +726,10 @@ static void handler(int sig)
             ptx_Utils_Print("PTX HW init OK\n");
             ptx_Demo_LedSet(PTX_DEMO_LED_PTX_READY, 1u);
 
-            /* Print HW-Info and all available Stack-revisions */
-            status = ptx_Utils_VersionInfo_Print_Revision(&rul);
+            /* RA2E3 (64 KB flash): revision info printout (ptx_Utils_VersionInfo) removed to make room for TAG mode. */
+            status = ptx_RunDemoApplication(&rul);
 
-            if (PTX_STATUS_SUCCESS == status)
-            {
-                status = ptx_RunDemoApplication(&rul);
-
-                ptx_Utils_Print("Demo done: %04X\n", status);
-            }
-            else
-            {
-                ptx_Utils_Print("Revision info failed: %04X\n", status);
-            }
+            ptx_Utils_Print("Demo done: %04X\n", status);
         }
         else
         {
@@ -526,17 +760,8 @@ static void handler(int sig)
     deact_params.State = ptx_RUL_DeactivateState_Idle;
     (void)ptx_RUL_Deactivate(&rul, &deact_params);
 
-    /* De-initialize the RUL API Component (independent of previous state) */
-    status = ptx_RUL_DeInit(&rul);
-
-    if (PTX_STATUS_SUCCESS == status)
-    {
-        ptx_Utils_Print("RUL DeInit OK\n");
-    }
-    else
-    {
-        ptx_Utils_Print("RUL DeInit failed: %04X\n", status);
-    }
+    /* RA2E3 (64 KB flash): no ptx_RUL_DeInit() - the demo only ends after a fatal error and the MCU stops anyway. */
+    ptx_Utils_Print("Stopped.\n");
 
 #if defined(PTX_PLATFORM_OS)
     (void)argc;
@@ -567,6 +792,13 @@ static ptx_Status_t ptx_RunDemoApplication(ptx_RUL_t *rul)
             {
                 /* Handle user commands from the UART terminal (non-blocking). */
                 ptx_Demo_CliPoll();
+
+                /* "tag" command: switch to card emulation while the reader is idle-polling; returns on any key. */
+                if ((0u != gTagRequested) && (DemoAppState_WaitForDiscovery == demo_state))
+                {
+                    (void)ptx_Demo_RunTagMode(rul);
+                    demo_state = DemoAppState_StartDiscovery;
+                }
 
                 /* Check regularly for System-state/-health (e.g. temperature/over-current errors etc.) */
                 status_info.Type = ptx_RUL_StatusType_System;
@@ -694,10 +926,10 @@ static ptx_Status_t ptx_ProcessState_StartDiscovery(ptx_RUL_t *rul, ptx_DemoAppS
         disc_params.PollTypeB = 1u;                         /* Poll for NFC-B Technology. */
         disc_params.PollTypeBPollFrequency = 1u;            /* Poll for NFC-B Technology during every Polling-Loop cycle (otherwise every n-th cycle). */
         disc_params.PollTypeBDeviceLimit = 5u;              /* Limit the number of NFC-B devices / cards to max. 5 devices (application can define max. value). */
-        disc_params.PollTypeF212 = 1u;                      /* Poll for NFC-F 212 kBit/s Technology. */
+        disc_params.PollTypeF212 = 0u;                      /* RA2E3 build: T3T (NFC-F) support removed (PTX_DISABLE_NDEF_T3T) - no NFC-F polling. */
         disc_params.PollTypeFPollFrequency = 1u;            /* Poll for NFC-F Technology during every Polling-Loop cycle (otherwise every n-th cycle). */
         disc_params.PollTypeFDeviceLimit = 5u;              /* Limit the number of NFC-F devices / cards to max. 5 devices (application can define max. value). */
-        disc_params.PollTypeV = 1u;                         /* Poll for NFC-V Technology. */
+        disc_params.PollTypeV = 0u;                         /* RA2E3 build: T5T (NFC-V) support removed (PTX_DISABLE_NDEF_T5T) - no NFC-V polling. */
         disc_params.PollTypeVPollFrequency = 1u;            /* Poll for NFC-V Technology during every Polling-Loop cycle (otherwise every n-th cycle). */
         disc_params.PollTypeVDeviceLimit = 5u;              /* Limit the number of NFC-V devices / cards to max. 5 devices (application can define max. value). */
         disc_params.EnableLPCD = 0;                         /* Don't use low-power-card-detection (LPCD) in this demo. */
@@ -969,8 +1201,7 @@ static ptx_Status_t ptx_ProcessState_NDEFDataExchange(ptx_RUL_t *rul, ptx_DemoAp
         {
             if (PTX_STATUS_SUCCESS == status)
             {
-                ptx_Utils_Print("NDEF: ");
-                ptx_Utils_Print_Buffer(&exchange_params.NdefMsgBuffer[0], (uint16_t)exchange_params.NdefMsgBufferSize, 1u, 1u);
+                ptx_Demo_PrintNdef(&exchange_params.NdefMsgBuffer[0], exchange_params.NdefMsgBufferSize);
             }
             else
             {
@@ -1166,7 +1397,7 @@ static ptx_Status_t ptx_ProcessState_NDEFDataExchange_General(ptx_RUL_t *rul, pt
             }
             else if ((PTX_STATUS_SUCCESS != status) && (0u != gPendingTextLen))
             {
-                ptx_Utils_Print("WRITE FAILED: not NDEF formatted (%04X)\n", status);
+                ptx_Utils_Print("WRITE FAILED: not NDEF (%04X)\n", status);
             }
             else
             {

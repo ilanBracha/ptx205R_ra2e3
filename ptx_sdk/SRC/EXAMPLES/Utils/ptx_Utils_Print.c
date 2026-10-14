@@ -410,7 +410,28 @@ uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
     return line_ready;
 }
 
+uint8_t ptx_Utils_Cli_AnyKey(void)
+{
+    uint8_t key = 0u;
+
+    if ((0u != sCliRxLen) || (0u != sCliLineReady))
+    {
+        /* Something was typed: consume it (not echoed, not executed as command). */
+        sCliRxLen     = 0;
+        sCliEchoLen   = 0;
+        sCliLineReady = 0;
+        key = 1u;
+    }
+
+    return key;
+}
+
 #elif defined(PTX_UTILITY_PRINTING_CONSOLE)
+
+uint8_t ptx_Utils_Cli_AnyKey(void)
+{
+    return 0u;
+}
 
 uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
 {
@@ -432,6 +453,11 @@ static void ptx_Utils_Write(char *msgBuffer, uint32_t msgLen)
 
 /* Not used: ptx_Utils_Print() hands the format string straight to SEGGER_RTT_vprintf(). */
 
+uint8_t ptx_Utils_Cli_AnyKey(void)
+{
+    return 0u;
+}
+
 uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
 {
     /* No CLI input on RTT. */
@@ -441,6 +467,11 @@ uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
 }
 
 #else
+
+uint8_t ptx_Utils_Cli_AnyKey(void)
+{
+    return 0u;
+}
 
 uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
 {

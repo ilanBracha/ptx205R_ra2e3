@@ -160,6 +160,9 @@ ptx_Status_t ptx_NSC_RUL_RfConfig_LoadParam(ptx_NSC_t *nsc)
                         config->RfCfgParam[idx].Length = ptx_NSC_RfConfig_PollB848_len;
                         break;
 
+/* RA2E3 port (64 KB flash): RF settings for technologies that are never used in this build are not loaded
+ * (skipped like unknown IDs below). NFC-F only with T3T, NFC-V only with T5T, Listen-B only if not disabled. */
+#if !defined(PTX_DISABLE_NDEF_T3T)
                     case NSC_RfConfig_ParamId_PollF212:
                         config->RfCfgParam[idx].Value = ptx_NSC_RfConfig_PollF212;
                         config->RfCfgParam[idx].Length = ptx_NSC_RfConfig_PollF212_len;
@@ -169,11 +172,13 @@ ptx_Status_t ptx_NSC_RUL_RfConfig_LoadParam(ptx_NSC_t *nsc)
                         config->RfCfgParam[idx].Value = ptx_NSC_RfConfig_PollF424;
                         config->RfCfgParam[idx].Length = ptx_NSC_RfConfig_PollF424_len;
                         break;
-
+#endif
+#if !defined(PTX_DISABLE_NDEF_T5T)
                     case NSC_RfConfig_ParamId_PollV_26K5:
                         config->RfCfgParam[idx].Value = ptx_NSC_RfConfig_PollV26_5;
                         config->RfCfgParam[idx].Length = ptx_NSC_RfConfig_PollV26_5_len;
                         break;
+#endif
 
 #if !defined(PTX_DISABLE_LISTEN_MODE)
                     case NSC_RfConfig_ParamId_Listen:
@@ -196,6 +201,7 @@ ptx_Status_t ptx_NSC_RUL_RfConfig_LoadParam(ptx_NSC_t *nsc)
                         config->RfCfgParam[idx].Length = ptx_NSC_RfConfig_ListenA848_len;
                         break;
 
+#if !defined(PTX_DISABLE_LISTEN_B)
                     case NSC_RfConfig_ParamId_ListenB212:
                         config->RfCfgParam[idx].Value = ptx_NSC_RfConfig_ListenB212;
                         config->RfCfgParam[idx].Length = ptx_NSC_RfConfig_ListenB212_len;
@@ -210,6 +216,7 @@ ptx_Status_t ptx_NSC_RUL_RfConfig_LoadParam(ptx_NSC_t *nsc)
                         config->RfCfgParam[idx].Value = ptx_NSC_RfConfig_ListenB848;
                         config->RfCfgParam[idx].Length = ptx_NSC_RfConfig_ListenB848_len;
                         break;
+#endif
 #endif /* PTX_DISABLE_LISTEN_MODE */
 
                     default:

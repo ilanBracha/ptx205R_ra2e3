@@ -788,5 +788,25 @@
 			<type>1</type>
 			<locationURI>PROJECT_LOC/ptx_sdk/SRC/COMPS/HAL/DRV/MCU/RA4M2/ptx_HAL_DRV_Timer_Int.h</locationURI>
 		</link>
+		<link>
+			<name>src/SRC/API/RUL_HCE/ptx_RUL_HCE.c</name>
+			<type>1</type>
+			<locationURI>PROJECT_LOC/ptx_sdk/SRC/API/RUL_HCE/ptx_RUL_HCE.c</locationURI>
+		</link>
+		<link>
+			<name>src/SRC/API/RUL_HCE/ptx_RUL_HCE.h</name>
+			<type>1</type>
+			<locationURI>PROJECT_LOC/ptx_sdk/SRC/API/RUL_HCE/ptx_RUL_HCE.h</locationURI>
+		</link>
+		<link>
+			<name>src/SRC/EXAMPLES/HCE_T4T/ptx_HCET4T.c</name>
+			<type>1</type>
+			<locationURI>PROJECT_LOC/ptx_sdk/SRC/EXAMPLES/ptx_Example_HCET4T/HCE_T4T/ptx_HCET4T.c</locationURI>
+		</link>
+		<link>
+			<name>src/SRC/EXAMPLES/HCE_T4T/ptx_HCET4T.h</name>
+			<type>1</type>
+			<locationURI>PROJECT_LOC/ptx_sdk/SRC/EXAMPLES/ptx_Example_HCET4T/HCE_T4T/ptx_HCET4T.h</locationURI>
+		</link>
 	</linkedResources>
 </projectDescription>
