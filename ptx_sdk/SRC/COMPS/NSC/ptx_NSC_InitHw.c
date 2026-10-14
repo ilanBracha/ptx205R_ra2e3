@@ -306,6 +306,31 @@ ptx_Status_t ptx_NSC_InitHw(ptx_NSC_t *nsc)
     return status;
 }
 
+/*
+ * RA2E3 port: 64-bit / 32-bit division without the libgcc 64-bit division helpers (__udivmoddi4 & co, ~1 KB).
+ * Restoring division using only shifts/compares/subtractions. Returns the quotient truncated to 32 bit,
+ * i.e. identical to (uint32_t)(n / d) for d != 0.
+ */
+static uint32_t ptx_NSC_UDiv64By32(uint64_t n, uint32_t d)
+{
+    uint64_t rem = 0;
+    uint32_t quot = 0;
+
+    for (uint32_t i = 0; i < 64u; i++)
+    {
+        rem = (rem << 1) | (n >> 63);
+        n <<= 1;
+        quot <<= 1;
+        if (rem >= (uint64_t)d)
+        {
+            rem -= (uint64_t)d;
+            quot |= 1u;
+        }
+    }
+
+    return quot;
+}
+
 ptx_Status_t ptx_NSC_CalculatePllParameters(ptx_NSC_t *nsc, ptx_NSC_SystemConfig_t *sysCfg, ptx_NSC_PllConfig_t *pllSettings)
 {
     ptx_Status_t status = PTX_STATUS_E_GEN_INVALID_PARAMETER;
@@ -333,24 +358,24 @@ ptx_Status_t ptx_NSC_CalculatePllParameters(ptx_NSC_t *nsc, ptx_NSC_SystemConfig
          * with exact 64-bit integer arithmetic (rounding to nearest where the original added 0.5).
          */
         uint64_t fvco_tg = (uint64_t)(uint32_t)(sysCfg->TargetFreq * 256U);
-        uint64_t fref    = (uint64_t)internal_fref;
+        uint32_t fref    = internal_fref;
 
         /*
          * NHOST = (256 * F_TARGET / F_REF) * 2^22
          */
-        pllSettings->NHost = (uint32_t)((fvco_tg << 22) / fref);
+        pllSettings->NHost = ptx_NSC_UDiv64By32(fvco_tg << 22, fref);
         pllSettings->NHostAlm = (uint32_t)(pllSettings->NHost + sysCfg->NAlmOffset);
 
         /*
          * GATE_PW = round( (64 * F_REF) / (1E6 * 2 ^ XTAL_DIV_EN) )
          */
-        pllSettings->GatePw = (uint16_t)(((PTX_PLL_FREQ_DIVIDER * fref) + (PTX_PLL_FRES_HZ / 2U)) / PTX_PLL_FRES_HZ);
+        pllSettings->GatePw = (uint16_t)(((PTX_PLL_FREQ_DIVIDER * fref) + (PTX_PLL_FRES_HZ / 2U)) / PTX_PLL_FRES_HZ);   /* fits 32 bit: 64 * 54.24 MHz < 2^32 */
 
         /*
          * SYS_CNT_TG = round( (FVCO_TG / F_REF) * GATE_PW / 64 )
          */
-        uint64_t den = fref * PTX_PLL_FREQ_DIVIDER;
-        pllSettings->SysCntTg = (uint16_t)(((fvco_tg * pllSettings->GatePw) + (den / 2U)) / den);
+        uint32_t den = fref * PTX_PLL_FREQ_DIVIDER;                                                                     /* < 2^32 */
+        pllSettings->SysCntTg = (uint16_t)ptx_NSC_UDiv64By32((fvco_tg * pllSettings->GatePw) + (uint64_t)(den / 2U), den);
 
         status = PTX_STATUS_SUCCESS;
     }

@@ -113,6 +113,14 @@ void ptx_Utils_Print_Callback(uart_callback_args_t *p_args);
 
 static volatile ptx_Utils_UartState_t sUartState = Uart_State_Idle;
 
+/* Simple line-based command input (CLI) on the same UART. Characters are collected in the RX callback. */
+#define PTX_UTILS_CLI_LINE_MAX                    (128u)      /* Max. command line length incl. terminating 0. */
+static volatile char     sCliRxBuf[PTX_UTILS_CLI_LINE_MAX];
+static volatile uint32_t sCliRxLen     = 0;
+static volatile uint8_t  sCliLineReady = 0;
+static volatile uint8_t  sCliLastWasCr = 0;      /* Swallow the LF of a CR+LF pair (terminal "Enter" = CR LF). */
+static uint32_t          sCliEchoLen   = 0;
+
 /* Max. busy-wait loops for one UART transfer (safety net so a UART problem can never hang the application). */
 #define PTX_UTILS_UART_TX_TIMEOUT_LOOPS           (2000000u)
 
@@ -320,20 +328,96 @@ void ptx_Utils_Print_Callback(uart_callback_args_t * p_args)
                 sUartState = Uart_State_TxDone;
                 break;
 
-            case UART_EVENT_ERR_PARITY:
-            case UART_EVENT_ERR_FRAMING:
-            case UART_EVENT_ERR_OVERFLOW:
-                sUartState = Uart_State_TxError;
+            case UART_EVENT_RX_CHAR:
+            {
+                /* CLI input: collect one line, finished by CR or LF. Ignored while a line waits to be fetched. */
+                char c = (char)(p_args->data & 0xFFu);
+                uint8_t lf_after_cr = (uint8_t)((('\n' == c) && (0u != sCliLastWasCr)) ? 1u : 0u);
+                sCliLastWasCr = (uint8_t)(('\r' == c) ? 1u : 0u);
+
+                if ((0u == sCliLineReady) && (0u == lf_after_cr))
+                {
+                    if (('\r' == c) || ('\n' == c))
+                    {
+                        /* Enter: line complete (an empty line is reported too -> new prompt). */
+                        sCliLineReady = 1u;
+                    }
+                    else if (('\b' == c) || ((char)0x7F == c))
+                    {
+                        if (0u != sCliRxLen)
+                        {
+                            sCliRxLen--;
+                        }
+                    }
+                    else if ((c >= ' ') && (sCliRxLen < (PTX_UTILS_CLI_LINE_MAX - 1u)))
+                    {
+                        sCliRxBuf[sCliRxLen] = c;
+                        sCliRxLen++;
+                    }
+                    else
+                    {
+                        /* Control character or line full - ignore. */
+                    }
+                }
                 break;
+            }
 
             default:
-                /* RX / TX_DATA_EMPTY etc. - not relevant for printing. */
+                /* RX errors / TX_DATA_EMPTY etc. - not relevant for printing. */
                 break;
         }
     }
 }
 
+uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
+{
+    uint8_t line_ready = 0u;
+    sci_uart_instance_ctrl_t *p_ctrl = (sci_uart_instance_ctrl_t *) ptx_uart_dbg.p_ctrl;
+
+    /* UART is opened by the first ptx_Utils_Print() call. */
+    if ((NULL != line) && (0u != lineSize) && (SCI_UART_OPEN == p_ctrl->open))
+    {
+        /* Echo what was typed since the last call (terminal has no local echo). */
+        uint32_t rx_len = sCliRxLen;
+        while (sCliEchoLen < rx_len)
+        {
+            ptx_Utils_Print("%c", sCliRxBuf[sCliEchoLen]);
+            sCliEchoLen++;
+        }
+        while (sCliEchoLen > rx_len)
+        {
+            ptx_Utils_Print("\b \b");
+            sCliEchoLen--;
+        }
+
+        if (0u != sCliLineReady)
+        {
+            uint32_t i = 0;
+            for (; (i < sCliRxLen) && (i < (lineSize - 1u)); i++)
+            {
+                line[i] = sCliRxBuf[i];
+            }
+            line[i] = '\0';
+
+            sCliRxLen     = 0;
+            sCliEchoLen   = 0;
+            sCliLineReady = 0;
+            ptx_Utils_Print("\n");
+            line_ready = 1u;
+        }
+    }
+
+    return line_ready;
+}
+
 #elif defined(PTX_UTILITY_PRINTING_CONSOLE)
+
+uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
+{
+    (void)line;
+    (void)lineSize;
+    return 0u;
+}
 
 static void ptx_Utils_Write(char *msgBuffer, uint32_t msgLen)
 {
@@ -348,7 +432,22 @@ static void ptx_Utils_Write(char *msgBuffer, uint32_t msgLen)
 
 /* Not used: ptx_Utils_Print() hands the format string straight to SEGGER_RTT_vprintf(). */
 
+uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
+{
+    /* No CLI input on RTT. */
+    (void)line;
+    (void)lineSize;
+    return 0u;
+}
+
 #else
+
+uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize)
+{
+    (void)line;
+    (void)lineSize;
+    return 0u;
+}
 
 static void ptx_Utils_Write(char *msgBuffer, uint32_t msgLen)
 {

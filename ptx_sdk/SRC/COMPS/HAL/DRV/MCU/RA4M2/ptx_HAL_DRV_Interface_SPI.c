@@ -116,6 +116,7 @@ static ptx_Status_t ptx_HAL_DRV_Interface_SPI_SetTransmissionSpeed(ptx_HAL_DRV_I
 static ptx_Status_t ptx_HAL_DRV_Interface_SPI_Wait4TransferDone (ptx_HAL_DRV_Interface_SPI_t *ctx);
 
 static ptx_Status_t ptx_HAL_DRV_Interface_SPI_PreConfigurePins(ptx_HAL_DRV_Interface_SPI_t *ctx);
+static void ptx_HAL_DRV_Interface_SPI_CalcDivider(uint32_t bitrate, sci_spi_div_setting_t *div);
 static ptx_Status_t ptx_HAL_DRV_Interface_SPI_DeConfigurePins(ptx_HAL_DRV_Interface_SPI_t *ctx);
 
 
@@ -206,7 +207,9 @@ ptx_Status_t ptx_HAL_DRV_Interface_SPI_Open(ptx_HAL_DRV_Interface_SPI_t *ctx)
                     sci_spi_div_setting_t baudrate_setting;
                     memset(&baudrate_setting, 0, sizeof(sci_spi_div_setting_t));
 
-                    r_status = R_SCI_SPI_CalculateBitrate(ctx->Speed, &baudrate_setting, false);
+                    /* Same result as R_SCI_SPI_CalculateBitrate(ctx->Speed, &baudrate_setting, false) without MDDR,
+                     * but 32-bit only (FSP version pulls the 64-bit division helpers into the 64 KB image). */
+                    ptx_HAL_DRV_Interface_SPI_CalcDivider(ctx->Speed, &baudrate_setting);
                     /*
                     * Set the SFRs, which are responsible for generating the desired clock frequency AFTER R_SCI_SPI_Open().
                     */
@@ -643,6 +646,35 @@ static ptx_Status_t ptx_HAL_DRV_Interface_SPI_PreConfigurePins(ptx_HAL_DRV_Inter
     }
 
     return status;
+}
+
+static void ptx_HAL_DRV_Interface_SPI_CalcDivider(uint32_t bitrate, sci_spi_div_setting_t *div)
+{
+    /* Simple SPI: bitrate = PCLK / (2^(2*cks + 2) * (brr + 1)). Pick the smallest cks with brr <= 255,
+     * brr rounded so that the resulting bitrate is <= the requested one (as FSP does). */
+    uint32_t pclk = R_FSP_SystemClockHzGet(BSP_FEATURE_SCI_CLOCK);
+    uint32_t cks  = 0;
+    uint32_t brr  = 0;
+
+    for (cks = 0; cks <= 3u; cks++)
+    {
+        uint32_t divisor = (1u << (2u * (cks + 1u))) * bitrate;
+        brr = ((pclk + divisor - 1u) / divisor) - 1u;
+        if (brr <= 255u)
+        {
+            break;
+        }
+    }
+
+    if (cks > 3u)
+    {
+        cks = 3u;
+        brr = 255u;
+    }
+
+    div->brr  = (uint8_t)brr;
+    div->cks  = (uint8_t)(cks & 3u);              /* 2-bit field (same as FSP) */
+    div->mddr = 0u;
 }
 
 static ptx_Status_t ptx_HAL_DRV_Interface_SPI_DeConfigurePins(ptx_HAL_DRV_Interface_SPI_t *ctx)

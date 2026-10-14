@@ -77,9 +77,7 @@ ptx_Status_t ptx_Utils_VersionInfo_Print_Revision(ptx_RUL_t *rul)
 
     if (NULL != rul)
     {
-        ptx_Utils_Print("***********************************************************\n");
-        ptx_Utils_Print("**************** Revision Information *********************\n");
-        ptx_Utils_Print("***********************************************************\n");
+        ptx_Utils_Print("-- Revision info --\n");
 
         /* Get C-Stack Revision */
         info_type = ptx_RUL_InfoType_Stack_Revision;
@@ -87,7 +85,7 @@ ptx_Status_t ptx_Utils_VersionInfo_Print_Revision(ptx_RUL_t *rul)
         status = ptx_RUL_GetInfo(rul, info_type, rev_info, &rev_info_size);
         if (PTX_STATUS_SUCCESS == status)
         {
-            ptx_Utils_Print("  C-Stack Revision.......: v%02X.%02X.%02X\n", rev_info[0], rev_info[1], rev_info[2]);
+            ptx_Utils_Print("Stack v%02X.%02X.%02X\n", rev_info[0], rev_info[1], rev_info[2]);
         }
 
         /* Get FW-Code Revision */
@@ -96,7 +94,7 @@ ptx_Status_t ptx_Utils_VersionInfo_Print_Revision(ptx_RUL_t *rul)
         status = ptx_RUL_GetInfo(rul, info_type, rev_info, &rev_info_size);
         if (PTX_STATUS_SUCCESS == status)
         {
-            ptx_Utils_Print("  FW-Code Revision.......: 0x%02X%02X\n", rev_info[1], rev_info[0]);
+            ptx_Utils_Print("FW 0x%02X%02X\n", rev_info[1], rev_info[0]);
         }
 
         /* Get RF-Config Version */
@@ -105,7 +103,7 @@ ptx_Status_t ptx_Utils_VersionInfo_Print_Revision(ptx_RUL_t *rul)
         status = ptx_RUL_GetInfo(rul, info_type, rev_info, &rev_info_size);
         if (PTX_STATUS_SUCCESS == status)
         {
-            ptx_Utils_Print("  RF-Config Version......: 0x%02X\n", rev_info[0]);
+            ptx_Utils_Print("RFcfg 0x%02X\n", rev_info[0]);
         }
 
         /* Get HW-Version */
@@ -114,33 +112,10 @@ ptx_Status_t ptx_Utils_VersionInfo_Print_Revision(ptx_RUL_t *rul)
         status = ptx_RUL_GetInfo(rul, info_type, rev_info, &rev_info_size);
         if (PTX_STATUS_SUCCESS == status)
         {
-            ptx_Utils_Print("  HW Version.............: 0x%02X\n", rev_info[0]);
+            ptx_Utils_Print("HW 0x%02X\n", rev_info[0]);
         }
 
-        /* Get Git Hash */
-        info_type = ptx_RUL_InfoType_Platform_Revision;
-        rev_info_size = PTX_RUL_REV_INFO_MAX_BUFFER_SIZE;
-        status = ptx_RUL_GetInfo(rul, info_type, rev_info, &rev_info_size);
-        if (PTX_STATUS_SUCCESS == status)
-        {
-            uint64_t hash = 0;
-            for (int i = 0; i < 8; i++) {
-                hash |= ((uint64_t)rev_info[i]) << (8 * i);
-            }
-            ptx_Utils_Print("  Platform Revision......: %01X%08X\n", (uint32_t)(hash >> 32 & 0xF), (uint32_t)(hash & 0xFFFFFFFF));
-        }
-
-        /* Get Local Changes */
-        info_type = ptx_RUL_InfoType_Local_Changes;
-        rev_info_size = PTX_RUL_REV_INFO_MAX_BUFFER_SIZE;
-        status = ptx_RUL_GetInfo(rul, info_type, rev_info, &rev_info_size);
-        if (PTX_STATUS_SUCCESS == status)
-        {
-            const char* value = rev_info[0] ? "yes": "no";
-            ptx_Utils_Print("  Local Changes..........: %s\n", value);
-        }
-
-        ptx_Utils_Print("***********************************************************\n");
+        /* RA2E3 port (64 KB flash): Platform revision (git hash) and local-changes info not printed. */
 
         status = PTX_STATUS_SUCCESS;
     }

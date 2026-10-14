@@ -114,9 +114,9 @@
  *   LED1 BLINK (fast, forever) -> PTX HW init failed (no/invalid SPI answer).
  *   LED2 ON  -> card/tag activated; OFF when the RF field is switched off again.
  */
-/* Card-parameter printing costs ~800 bytes of flash; it is skipped while the bring-up debug prints are active
- * (64 KB RA2E3). Define PTX_DEBUG_PRINTS_DISABLE to get both the card info back and the debug prints removed. */
-#if defined(PTX_DEBUG_PRINTS)
+/* Card-parameter printing costs ~800 bytes of flash (64 KB RA2E3): disabled to make room for NDEF write support.
+ * Define PTX_DEMO_PRINT_CARD_INFO to get it back (only if the image still fits). */
+#if !defined(PTX_DEMO_PRINT_CARD_INFO)
     #define PTX_DEMO_PRINT_CARD_PARAMS(rul, id)     ((void)(rul), (void)(id), PTX_STATUS_SUCCESS)
 #else
     #define PTX_DEMO_PRINT_CARD_PARAMS(rul, id)     ptx_Utils_CardInfo_Print_Card_Parameters((rul), (id))
@@ -220,6 +220,108 @@ typedef struct ptx_DemoApplication_ExchangeParams
 } ptx_DemoApplication_ExchangeParams_t;
 
 /*
+ * Simple UART CLI (115200 8N1 on the J-Link VCOM):
+ *   write <text>  - arm <text>; it is written as NDEF Text record ("en") to the next tag presented
+ *   cancel        - drop a pending write
+ *   status        - show pending write
+ *   help          - list commands
+ * After a successful write the tag is read back and printed; the pending text is then cleared (one-shot).
+ */
+#define PTX_DEMO_CLI_LINE_SIZE          (128u)                              /* Incl. terminating 0 */
+#define PTX_DEMO_NDEF_TEXT_LANG         "en"
+#define PTX_DEMO_NDEF_TEXT_HDR_LEN      (7u)                                /* 4 byte short-record header + status + "en" */
+#define PTX_DEMO_NDEF_TEXT_MAX          (PTX_DEMO_CLI_LINE_SIZE - 7u)       /* "write " prefix removed */
+
+static char     gPendingText[PTX_DEMO_NDEF_TEXT_MAX + 1u];
+static uint32_t gPendingTextLen = 0;
+
+#define PTX_DEMO_CLI_PROMPT             "$ nfc > "
+
+static void ptx_Demo_CliPrompt(void)
+{
+    ptx_Utils_Print(PTX_DEMO_CLI_PROMPT);
+}
+
+static void ptx_Demo_CliHelp(void)
+{
+    ptx_Utils_Print("CLI: write <text> | cancel | status | help\n");
+}
+
+static void ptx_Demo_CliPoll(void)
+{
+    char line[PTX_DEMO_CLI_LINE_SIZE];
+
+    if (0u != ptx_Utils_Cli_GetLine(line, (uint32_t)sizeof(line)))
+    {
+        if ('\0' == line[0])
+        {
+            /* Enter on an empty line: just a new prompt. */
+        }
+        else if (0 == strncmp(line, "write ", 6))
+        {
+            const char *text = &line[6];
+            uint32_t len = (uint32_t)strlen(text);
+
+            if ((0u != len) && (len <= PTX_DEMO_NDEF_TEXT_MAX))
+            {
+                (void)memcpy(gPendingText, text, len);
+                gPendingText[len] = '\0';
+                gPendingTextLen = len;
+                ptx_Utils_Print("Armed: \"%s\" - present a tag to write\n", gPendingText);
+            }
+            else
+            {
+                ptx_Utils_Print("Text must be 1..%u chars\n", (uint32_t)PTX_DEMO_NDEF_TEXT_MAX);
+            }
+        }
+        else if (0 == strcmp(line, "cancel"))
+        {
+            gPendingTextLen = 0;
+            ptx_Utils_Print("Write cancelled\n");
+        }
+        else if (0 == strcmp(line, "status"))
+        {
+            if (0u != gPendingTextLen)
+            {
+                ptx_Utils_Print("Pending write: \"%s\"\n", gPendingText);
+            }
+            else
+            {
+                ptx_Utils_Print("No pending write (read mode)\n");
+            }
+        }
+        else
+        {
+            ptx_Demo_CliHelp();
+        }
+
+        ptx_Demo_CliPrompt();
+    }
+}
+
+/* Builds a single NDEF Text record (NFC Forum RTD Text, UTF-8, language "en") into buffer. Returns message length. */
+static uint32_t ptx_Demo_BuildTextNdef(uint8_t *buffer, uint32_t bufferSize, const char *text, uint32_t textLen)
+{
+    uint32_t msg_len = 0;
+    const uint32_t payload_len = 1u + 2u + textLen;                     /* status byte + "en" + text */
+
+    if ((NULL != buffer) && ((PTX_DEMO_NDEF_TEXT_HDR_LEN + textLen) <= bufferSize) && (payload_len <= 255u))
+    {
+        buffer[0] = 0xD1u;                                              /* MB=1, ME=1, SR=1, TNF=0x01 (Well-known) */
+        buffer[1] = 0x01u;                                              /* Type length */
+        buffer[2] = (uint8_t)payload_len;                               /* Payload length (short record) */
+        buffer[3] = (uint8_t)'T';                                       /* Type "T" (Text) */
+        buffer[4] = 0x02u;                                              /* Status: UTF-8, language code length 2 */
+        buffer[5] = (uint8_t)PTX_DEMO_NDEF_TEXT_LANG[0];
+        buffer[6] = (uint8_t)PTX_DEMO_NDEF_TEXT_LANG[1];
+        (void)memcpy(&buffer[PTX_DEMO_NDEF_TEXT_HDR_LEN], text, textLen);
+        msg_len = PTX_DEMO_NDEF_TEXT_HDR_LEN + textLen;
+    }
+
+    return msg_len;
+}
+
+/*
  * ####################################################################################################################
  * INTERNAL FUNCTIONS DECLARATIONS / HELPERS
  * ####################################################################################################################
@@ -313,9 +415,9 @@ static void handler(int sig)
     /* Other components */
     ptx_RUL_DeactivateParams_t deact_params = {0};
 
-    ptx_Utils_Print("*****************************\n");
+    ptx_Utils_Print("-----------------------\n");
     ptx_Utils_Print("** NFC Forum NDEF Demo %s **\n", PTX_DEMO_VERSION);
-    ptx_Utils_Print("*****************************\n");
+    ptx_Utils_Print("-----------------------\n");
 
     /* Initialize demo application parameters with default values. */
     (void)memcpy(&app_params.DeviceName[0], EXAMPLE_DEVICE_NAME, EXAMPLE_DEVICE_NAME_LEN);
@@ -342,7 +444,7 @@ static void handler(int sig)
 
     if (PTX_STATUS_SUCCESS == status)
     {
-        ptx_Utils_Print("RUL SW-Stack successfully initialized!\n");
+        ptx_Utils_Print("RUL Init OK\n");
 
 #if defined(PTX_ENABLE_BOARD_EVK)
         /*
@@ -378,7 +480,7 @@ static void handler(int sig)
 
         if (PTX_STATUS_SUCCESS == status)
         {
-            ptx_Utils_Print("PTX Hardware-/-Chip successfully initialized!\n");
+            ptx_Utils_Print("PTX HW init OK\n");
             ptx_Demo_LedSet(PTX_DEMO_LED_PTX_READY, 1u);
 
             /* Print HW-Info and all available Stack-revisions */
@@ -388,7 +490,7 @@ static void handler(int sig)
             {
                 status = ptx_RunDemoApplication(&rul);
 
-                ptx_Utils_Print("Demo Application completed with Status %04X!\n", status);
+                ptx_Utils_Print("Demo done: %04X\n", status);
             }
             else
             {
@@ -429,7 +531,7 @@ static void handler(int sig)
 
     if (PTX_STATUS_SUCCESS == status)
     {
-        ptx_Utils_Print("RUL-Stack successfully de-initialized!\n");
+        ptx_Utils_Print("RUL DeInit OK\n");
     }
     else
     {
@@ -459,8 +561,13 @@ static ptx_Status_t ptx_RunDemoApplication(ptx_RUL_t *rul)
 
         if (PTX_STATUS_SUCCESS == status)
         {
+            ptx_Demo_CliHelp();
+
             do
             {
+                /* Handle user commands from the UART terminal (non-blocking). */
+                ptx_Demo_CliPoll();
+
                 /* Check regularly for System-state/-health (e.g. temperature/over-current errors etc.) */
                 status_info.Type = ptx_RUL_StatusType_System;
 
@@ -537,7 +644,7 @@ static ptx_Status_t ptx_RunDemoApplication(ptx_RUL_t *rul)
 
                         default:
                         {
-                            ptx_Utils_Print("Invalid Application-State detected!\n");
+                            ptx_Utils_Print("Invalid app state\n");
                             demo_state = DemoAppState_Exit;
                             break;
                         }
@@ -603,7 +710,8 @@ static ptx_Status_t ptx_ProcessState_StartDiscovery(ptx_RUL_t *rul, ptx_DemoAppS
         if (PTX_STATUS_SUCCESS == status)
         {
             *appState = DemoAppState_WaitForDiscovery;
-            ptx_Utils_Print("Discovery started - waiting for cards...\n");
+            ptx_Utils_Print("Waiting for cards...\n");
+            ptx_Demo_CliPrompt();
         }
         else
         {
@@ -642,7 +750,7 @@ static ptx_Status_t ptx_ProcessState_WaitForDiscovery(ptx_RUL_t *rul, ptx_DemoAp
                 case ptx_RUL_StatusInfoDiscover_CardDetectionOngoing:
                 {
                     /* Multiple cards present, the internal Discovery-procedure is still busy resolving all cards. */
-                    ptx_Utils_Print("Multiple cards - resolving...\n");
+                    ptx_Utils_Print("Multiple cards\n");
                     (void)ptx_RUL_Sleep(rul, PTX_DEMO_APP_CARD_RESOVLVE_SLEEP_MS);
                     break;
                 }
@@ -677,7 +785,7 @@ static ptx_Status_t ptx_ProcessState_WaitForDiscovery(ptx_RUL_t *rul, ptx_DemoAp
                      * In this demo, the first suitable protocol supported will be used for the example data exchange, but
                      * specific protocol needed by the application can be selected as well.
                      */
-                    ptx_Utils_Print("Multi-protocol card - activating first protocol\n");
+                    ptx_Utils_Print("Multi-protocol card\n");
 
                     /* Print all available Card-Infos as a List. */
                     (void)PTX_DEMO_PRINT_CARD_PARAMS(rul, 0);
@@ -773,7 +881,7 @@ static ptx_Status_t ptx_ProcessState_SelectCard(ptx_RUL_t *rul, ptx_DemoAppState
 
         if (PTX_STATUS_SUCCESS == status)
         {
-            ptx_Utils_Print("Card Activation/Selection successful!");
+            ptx_Utils_Print("Card selected\n");
             ptx_Demo_LedSet(PTX_DEMO_LED_CARD, 1u);
 
             /* Activation / Selection successfully - print Card-infos and move on to exchange example data. */
@@ -851,7 +959,7 @@ static ptx_Status_t ptx_ProcessState_NDEFDataExchange(ptx_RUL_t *rul, ptx_DemoAp
             {
                 status = PTX_STATUS_SUCCESS;
                 do_ndef_exchange = 0;
-                ptx_Utils_Print("Unsupported protocol - restart discovery\n");
+                ptx_Utils_Print("Unsupported protocol\n");
                 break;
             }
         }
@@ -861,12 +969,12 @@ static ptx_Status_t ptx_ProcessState_NDEFDataExchange(ptx_RUL_t *rul, ptx_DemoAp
         {
             if (PTX_STATUS_SUCCESS == status)
             {
-                ptx_Utils_Print("SUCCESS - Read NDEF Message: ");
+                ptx_Utils_Print("NDEF: ");
                 ptx_Utils_Print_Buffer(&exchange_params.NdefMsgBuffer[0], (uint16_t)exchange_params.NdefMsgBufferSize, 1u, 1u);
             }
             else
             {
-                ptx_Utils_Print("ERROR - Failed with Error-Status %04X!\n", status);
+                ptx_Utils_Print("NDEF error: %04X\n", status);
 
                 /*
                  * RF-/NFC data exchanges may fail due to various reasons (e.g. movement) or there is
@@ -898,7 +1006,7 @@ static ptx_Status_t ptx_ProcessState_DeactivateReader(ptx_RUL_t *rul, ptx_DemoAp
 
         if (PTX_STATUS_SUCCESS == status)
         {
-            ptx_Utils_Print("RF-Field switched off successfully.\n");
+            ptx_Utils_Print("RF off\n");
             ptx_Demo_LedSet(PTX_DEMO_LED_CARD, 0u);
         }
         else
@@ -928,7 +1036,8 @@ static ptx_Status_t ptx_ProcessState_RestartDiscovery(ptx_RUL_t *rul, ptx_DemoAp
 
         if (PTX_STATUS_SUCCESS == status)
         {
-            ptx_Utils_Print("RF reset - waiting for cards...\n");
+            ptx_Utils_Print("Waiting for cards...\n");
+            ptx_Demo_CliPrompt();
             *appState = DemoAppState_WaitForDiscovery;
         }
         else
@@ -953,13 +1062,13 @@ static ptx_Status_t ptx_ProcessState_SystemError(ptx_RUL_t *rul, ptx_DemoAppStat
          */
         if (ptx_RUL_StatusInfoSystem_ErrorOvercurrent == statusInfoParam->Info.System)
         {
-            ptx_Utils_Print("WARNING - Overcurrent Limiter activated!\n");
+            ptx_Utils_Print("WARN: over-current\n");
             *appState = DemoAppState_Exit;
         }
 
         if (ptx_RUL_StatusInfoSystem_ErrorTemperature == statusInfoParam->Info.System)
         {
-            ptx_Utils_Print("WARNING - Temperature Limiter activated!\n");
+            ptx_Utils_Print("WARN: over-temperature\n");
             status = ptx_ProcessState_RestartSystem(rul, appState);
         }
 
@@ -971,7 +1080,7 @@ static ptx_Status_t ptx_ProcessState_SystemError(ptx_RUL_t *rul, ptx_DemoAppStat
 
         if (ptx_RUL_StatusInfoSystem_NSCReset == statusInfoParam->Info.System)
         {
-            ptx_Utils_Print("WARNING - Unexpected System Reset - exiting Application!\n");
+            ptx_Utils_Print("WARN: unexpected PTX reset - exit\n");
             *appState = DemoAppState_Exit;
         }
     }
@@ -1033,6 +1142,36 @@ static ptx_Status_t ptx_ProcessState_NDEFDataExchange_General(ptx_RUL_t *rul, pt
         {
             /* Check if the activated Tag is NDEF-formatted. */
             status = ptx_NDEF_CheckMessage(&gen_ndef);
+
+            if ((PTX_STATUS_SUCCESS == status) && (0u != gPendingTextLen))
+            {
+                /* A CLI write is pending: write the text as NDEF Text record to this tag. */
+                uint32_t msg_len = ptx_Demo_BuildTextNdef(&exchangeParams->NdefMsgBuffer[0], (uint32_t)PTX_DEMO_APP_EXAMPLE_WORK_BUFFER_SIZE,
+                                                          gPendingText, gPendingTextLen);
+
+                status = ptx_NDEF_WriteMessage(&gen_ndef, &exchangeParams->NdefMsgBuffer[0], msg_len);
+
+                if (PTX_STATUS_SUCCESS == status)
+                {
+                    ptx_Utils_Print("WRITE OK: \"%s\"\n", gPendingText);
+                    gPendingTextLen = 0;                                /* One-shot: back to read mode. */
+                }
+                else
+                {
+                    ptx_Utils_Print("WRITE FAILED: %04X (still armed)\n", status);
+                }
+
+                /* Read back what is on the tag now. */
+                exchangeParams->NdefMsgBufferSize = (uint32_t)PTX_DEMO_APP_EXAMPLE_WORK_BUFFER_SIZE;
+            }
+            else if ((PTX_STATUS_SUCCESS != status) && (0u != gPendingTextLen))
+            {
+                ptx_Utils_Print("WRITE FAILED: not NDEF formatted (%04X)\n", status);
+            }
+            else
+            {
+                /* Read mode. */
+            }
 
             if (PTX_STATUS_SUCCESS == status)
             {

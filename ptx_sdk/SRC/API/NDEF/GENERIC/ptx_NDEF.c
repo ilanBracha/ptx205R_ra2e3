@@ -328,8 +328,11 @@ ptx_Status_t ptx_NDEF_WriteMessage (ptx_NDEF_t *ndef, uint8_t *msgBuffer, uint32
 #endif
                 break;
             case ptx_RUL_CardProtocolType_T3T:
-#if !defined(PTX_DISABLE_NDEF_T3T)
+#if !defined(PTX_DISABLE_NDEF_T3T) && !defined(PTX_DISABLE_NDEF_T3T_WRITE)
                 status = ptx_NDEF_T3T_WriteMessage(&ndef->tagCtx.t3t, msgBuffer, msgLen);
+#else
+                (void)msgBuffer;
+                (void)msgLen;
 #endif
                 break;
             case ptx_RUL_CardProtocolType_T4T:
@@ -338,8 +341,11 @@ ptx_Status_t ptx_NDEF_WriteMessage (ptx_NDEF_t *ndef, uint8_t *msgBuffer, uint32
 #endif
                 break;
             case ptx_RUL_CardProtocolType_T5T:
-#if !defined(PTX_DISABLE_NDEF_T5T)
+#if !defined(PTX_DISABLE_NDEF_T5T) && !defined(PTX_DISABLE_NDEF_T5T_WRITE)
                 status = ptx_NDEF_T5T_WriteMessage(&ndef->tagCtx.t5t, msgBuffer, msgLen);
+#else
+                (void)msgBuffer;
+                (void)msgLen;
 #endif
                 break;
             default:

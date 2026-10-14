@@ -108,6 +108,13 @@ void ptx_Utils_Print(const char *format, ...);
  */
 void ptx_Utils_Print_Buffer(uint8_t *buffer, uint16_t bufferLength, uint8_t addNewLine, uint8_t printASCII);
 
+/**
+ * \brief Simple CLI input: returns 1 and copies a complete command line (0-terminated, without CR/LF) into line
+ *        when the user has pressed Enter on the UART terminal; otherwise returns 0. Typed characters are echoed.
+ *        Call it regularly from the application main loop (non-blocking).
+ */
+uint8_t ptx_Utils_Cli_GetLine(char *line, uint32_t lineSize);
+
 /*
  * Temporary bring-up debug prints (UART). Enabled by default on MCU builds;
  * add PTX_DEBUG_PRINTS_DISABLE to the compiler defines to remove them (and their flash cost).
