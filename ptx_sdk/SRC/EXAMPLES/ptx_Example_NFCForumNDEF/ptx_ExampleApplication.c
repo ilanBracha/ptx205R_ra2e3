@@ -241,6 +241,38 @@ static uint32_t gPendingTextLen = 0;
 static char     gTagText[PTX_DEMO_NDEF_TEXT_MAX + 1u];
 static uint32_t gTagTextLen = 0;
 static uint8_t  gTagRequested = 0;
+static uint8_t  gTagIsBt = 0;                     /* 1: TAG mode presents a Bluetooth pairing record instead of text */
+static uint8_t  gTagBtAddr[6];                    /* Bluetooth device address, as typed (MSB first) */
+
+#define PTX_DEMO_BT_NAME_MAX            (30u)     /* Max. Bluetooth device name in the pairing record */
+
+/* Parses "AA:BB:CC:DD:EE:FF" (':' or '-' separators) into addr[0..5] (MSB first). Returns 1 on success. */
+static uint8_t ptx_Demo_ParseBtAddr(const char *str, uint8_t *addr)
+{
+    uint8_t ok = 1u;
+
+    for (uint32_t i = 0; (i < 6u) && (0u != ok); i++)
+    {
+        uint8_t val = 0;
+        for (uint32_t k = 0; k < 2u; k++)
+        {
+            char c = str[(i * 3u) + k];
+            uint8_t nib;
+            if ((c >= '0') && (c <= '9'))      { nib = (uint8_t)(c - '0'); }
+            else if ((c >= 'a') && (c <= 'f')) { nib = (uint8_t)(c - 'a' + 10); }
+            else if ((c >= 'A') && (c <= 'F')) { nib = (uint8_t)(c - 'A' + 10); }
+            else                               { nib = 0; ok = 0u; }
+            val = (uint8_t)((val << 4) | nib);
+        }
+        addr[i] = val;
+        if ((i < 5u) && (':' != str[(i * 3u) + 2u]) && ('-' != str[(i * 3u) + 2u]))
+        {
+            ok = 0u;
+        }
+    }
+
+    return ok;
+}
 
 #define PTX_DEMO_CLI_PROMPT             "$ nfc > "
 
@@ -251,7 +283,7 @@ static void ptx_Demo_CliPrompt(void)
 
 static void ptx_Demo_CliHelp(void)
 {
-    ptx_Utils_Print("CLI: write <text> | tag <text> | cancel | status | help\n");
+    ptx_Utils_Print("CLI: write <text> | tag <text> | bt <mac> [name] | cancel | status | help\n");
 }
 
 static void ptx_Demo_CliPoll(void)
@@ -291,11 +323,41 @@ static void ptx_Demo_CliPoll(void)
                 (void)memcpy(gTagText, text, len);
                 gTagText[len] = '\0';
                 gTagTextLen = len;
+                gTagIsBt = 0u;
                 gTagRequested = 1u;
             }
             else
             {
                 ptx_Utils_Print("Text must be 1..%u chars\n", (uint32_t)PTX_DEMO_NDEF_TEXT_MAX);
+            }
+        }
+        else if ((0 == strncmp(line, "bt ", 3)) || (0 == strncmp(line, "BT ", 3)))
+        {
+            /* bt AA:BB:CC:DD:EE:FF [name] - TAG mode with a Bluetooth (BR/EDR) pairing record for e.g. an earpiece. */
+            const char *name = &line[3 + 17];
+            uint32_t len = 0;
+
+            if ((strlen(&line[3]) >= 17u) && (0u != ptx_Demo_ParseBtAddr(&line[3], gTagBtAddr)) &&
+                (('\0' == *name) || (' ' == *name)))
+            {
+                if (' ' == *name)
+                {
+                    name++;
+                }
+                len = (uint32_t)strlen(name);
+                if (len > PTX_DEMO_BT_NAME_MAX)
+                {
+                    len = PTX_DEMO_BT_NAME_MAX;
+                }
+                (void)memcpy(gTagText, name, len);
+                gTagText[len] = '\0';
+                gTagTextLen = len;
+                gTagIsBt = 1u;
+                gTagRequested = 1u;
+            }
+            else
+            {
+                ptx_Utils_Print("Usage: bt AA:BB:CC:DD:EE:FF [name]\n");
             }
         }
         else if (0 == strcmp(line, "cancel"))
@@ -410,6 +472,56 @@ static uint32_t ptx_Demo_BuildTextNdef(uint8_t *buffer, uint32_t bufferSize, con
 }
 
 /*
+ * Builds an NFC Forum Bluetooth static-handover record (BR/EDR, MIME "application/vnd.bluetooth.ep.oob"):
+ * payload = OOB length (2 byte LE) + BD_ADDR (6 byte, LSB first) + EIR: Class of Device + Complete Local Name.
+ * Android reads it, pairs with the device and connects the audio profiles (headset / earpiece).
+ */
+#define PTX_DEMO_BT_MIME_TYPE           "application/vnd.bluetooth.ep.oob"
+#define PTX_DEMO_BT_MIME_TYPE_LEN       (32u)
+#define PTX_DEMO_BT_EIR_CLASS_OF_DEVICE (0x0Du)
+#define PTX_DEMO_BT_EIR_COMPLETE_NAME   (0x09u)
+
+static uint32_t ptx_Demo_BuildBtNdef(uint8_t *buffer, uint32_t bufferSize, const uint8_t *addr, const char *name, uint32_t nameLen)
+{
+    /* Class of Device 0x240404: Audio + Rendering service, major Audio/Video, minor Wearable Headset (LSB first). */
+    static const uint8_t cod[3] = { 0x04, 0x04, 0x24 };
+    uint32_t payload_len = 2u + 6u + 5u + ((0u != nameLen) ? (2u + nameLen) : 0u);
+    uint32_t msg_len = 0;
+
+    if ((NULL != buffer) && ((3u + PTX_DEMO_BT_MIME_TYPE_LEN + payload_len) <= bufferSize) && (payload_len <= 255u))
+    {
+        uint32_t i = 0;
+        buffer[i++] = 0xD2u;                                        /* MB=1, ME=1, SR=1, TNF=0x02 (MIME media type) */
+        buffer[i++] = (uint8_t)PTX_DEMO_BT_MIME_TYPE_LEN;
+        buffer[i++] = (uint8_t)payload_len;
+        (void)memcpy(&buffer[i], PTX_DEMO_BT_MIME_TYPE, PTX_DEMO_BT_MIME_TYPE_LEN);
+        i += PTX_DEMO_BT_MIME_TYPE_LEN;
+
+        buffer[i++] = (uint8_t)(payload_len & 0xFFu);               /* OOB data length, little endian */
+        buffer[i++] = (uint8_t)((payload_len >> 8) & 0xFFu);
+        for (uint32_t k = 0; k < 6u; k++)
+        {
+            buffer[i++] = addr[5u - k];                             /* BD_ADDR, LSB first */
+        }
+        buffer[i++] = 4u;                                           /* EIR: Class of Device */
+        buffer[i++] = PTX_DEMO_BT_EIR_CLASS_OF_DEVICE;
+        buffer[i++] = cod[0];
+        buffer[i++] = cod[1];
+        buffer[i++] = cod[2];
+        if (0u != nameLen)
+        {
+            buffer[i++] = (uint8_t)(nameLen + 1u);                  /* EIR: Complete Local Name */
+            buffer[i++] = PTX_DEMO_BT_EIR_COMPLETE_NAME;
+            (void)memcpy(&buffer[i], name, nameLen);
+            i += nameLen;
+        }
+        msg_len = i;
+    }
+
+    return msg_len;
+}
+
+/*
  * ####################################################################################################################
  * TAG MODE - card emulation of an NFC Forum Type 4 Tag (ISO-DEP, NFC-A) holding one NDEF Text record.
  * Uses the SDK Host Card Emulation component (RUL_HCE) and the T4T emulation helper (HCE_T4T example module).
@@ -445,9 +557,11 @@ static ptx_Status_t ptx_Demo_RunTagMode(ptx_RUL_t *rul)
 
     gTagRequested = 0u;
 
-    /* NDEF file = 2 byte NLEN (big endian) + NDEF message (one Text record). */
+    /* NDEF file = 2 byte NLEN (big endian) + NDEF message (one Text or one Bluetooth pairing record). */
     (void)memset(gTagNdefFile, 0, sizeof(gTagNdefFile));
-    uint32_t msg_len = ptx_Demo_BuildTextNdef(&gTagNdefFile[2], (uint32_t)sizeof(gTagNdefFile) - 2u, gTagText, gTagTextLen);
+    uint32_t msg_len = (0u != gTagIsBt) ?
+        ptx_Demo_BuildBtNdef(&gTagNdefFile[2], (uint32_t)sizeof(gTagNdefFile) - 2u, gTagBtAddr, gTagText, gTagTextLen) :
+        ptx_Demo_BuildTextNdef(&gTagNdefFile[2], (uint32_t)sizeof(gTagNdefFile) - 2u, gTagText, gTagTextLen);
     gTagNdefFile[0] = (uint8_t)((msg_len >> 8) & 0xFFu);
     gTagNdefFile[1] = (uint8_t)(msg_len & 0xFFu);
 
@@ -492,7 +606,15 @@ static ptx_Status_t ptx_Demo_RunTagMode(ptx_RUL_t *rul)
 
     if (PTX_STATUS_SUCCESS == status)
     {
-        ptx_Utils_Print("TAG \"%s\" (any key: exit)\n", gTagText);
+        if (0u != gTagIsBt)
+        {
+            ptx_Utils_Print("TAG BT %02X:%02X:%02X:%02X:%02X:%02X \"%s\" (any key: exit)\n", gTagBtAddr[0], gTagBtAddr[1],
+                            gTagBtAddr[2], gTagBtAddr[3], gTagBtAddr[4], gTagBtAddr[5], gTagText);
+        }
+        else
+        {
+            ptx_Utils_Print("TAG \"%s\" (any key: exit)\n", gTagText);
+        }
         ptx_Demo_LedSet(PTX_DEMO_LED_CARD, 1u);
         (void)ptx_Utils_Cli_AnyKey();                       /* drop keys typed before TAG mode started */
     }

@@ -102,9 +102,15 @@ static const uint8_t ptx_NSC_RfDiscover_ListenIsoDep_ATS[PTX_NSC_RF_DISCOVER_ATS
 /* Using sparse initialization with designated initializers to comply with MISRA Rule 9.3. */
 static const uint8_t ptx_NSC_RfDiscover_ListenIsoDep_AttribRes[PTX_NSC_RF_DISCOVER_ATTRIBRES_LEN] = {[0] = 0x00, [1] = 0x00};                               /* Default ListenIsoDep ATTRIB_RES. */
 
+#if !defined(PTX_DISABLE_LISTEN_B)
 static const uint8_t ptx_NSC_RfDiscover_ListenB_NfcId0[PTX_NSC_RF_DISCOVER_NFCID0_LEN] = {0x80, 0x01, 0x03, 0x02};                                          /* Default ListenB NFCID0. */
+#endif
+#if !defined(PTX_DISABLE_LISTEN_B)
 static const uint8_t ptx_NSC_RfDiscover_ListenB_ApplicationData[PTX_NSC_RF_DISCOVER_APPDATA_LEN] = {0x00, 0x00, 0x00, 0x00};                                /* Default ListenB SENSB_RES Application Data. */
+#endif
+#if !defined(PTX_DISABLE_LISTEN_B)
 static const uint8_t ptx_NSC_RfDiscover_ListenB_ProtocolInfo[PTX_NSC_RF_DISCOVER_PROTOCOLINFO_LEN] = {0x80, 0x87, 0x73, 0x00};                              /* Default ListenB SENSB_RES ProtocolInfo. */
+#endif
 
 static const uint8_t ptx_NSC_RfDiscover_ListenF_NfcId2[PTX_NSC_RF_DISCOVER_NFCID2_LEN] = {0x02, 0xFE, 0x80, 0x40, 0x30, 0x20, 0x10, 0x00};                  /* Default ListenF NFCID2. */
 static const uint8_t ptx_NSC_RfDiscover_ListenF_Pad0[PTX_NSC_RF_DISCOVER_PAD0_LEN] = {0x00, 0x00};                                                          /* Default ListenF PAD0. */
@@ -120,7 +126,9 @@ static const uint8_t ptx_NSC_RfDiscover_ListenF_Pad2[PTX_NSC_RF_DISCOVER_PAD2_LE
 
 static ptx_Status_t ptx_NSC_ConfigureListen(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
 static ptx_Status_t ptx_NSC_ConfigureListenA(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
+#if !defined(PTX_DISABLE_LISTEN_B)
 static ptx_Status_t ptx_NSC_ConfigureListenB(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
+#endif
 static ptx_Status_t ptx_NSC_ConfigureListenF(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
 static ptx_Status_t ptx_NSC_ConfigureListenIsoDep(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
 static ptx_Status_t ptx_NSC_ConfigureListenNfcDep(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
@@ -148,9 +156,11 @@ ptx_Status_t ptx_NSC_GetRfDiscoveryParam_Listen(ptx_NSC_t *nsc, ptx_NSC_RfDiscov
             case NSC_RfDiscover_Param_Type_ListenA:
                 status = ptx_NSC_ConfigureListenA(cfg, params);
                 break;
+#if !defined(PTX_DISABLE_LISTEN_B)
             case NSC_RfDiscover_Param_Type_ListenB:
                 status = ptx_NSC_ConfigureListenB(cfg, params);
                 break;
+#endif
             case NSC_RfDiscover_Param_Type_ListenF:
                 status = ptx_NSC_ConfigureListenF(cfg, params);
                 break;
@@ -252,6 +262,7 @@ ptx_Status_t ptx_NSC_ParamParser_ListenA(uint8_t **bufferPos, uint32_t *availabl
     return status;
 }
 
+#if !defined(PTX_DISABLE_LISTEN_B)
 ptx_Status_t ptx_NSC_ParamParser_ListenB(uint8_t **bufferPos, uint32_t *availableLen, ptx_NSC_RfDiscover_Param_Value_t *param, ptx_NSC_State_t *nextState)
 {
     /* Prevent compiler unused-parameter warning */
@@ -289,6 +300,7 @@ ptx_Status_t ptx_NSC_ParamParser_ListenB(uint8_t **bufferPos, uint32_t *availabl
 
     return status;
 }
+#endif
 
 ptx_Status_t ptx_NSC_ParamParser_ListenF(uint8_t **bufferPos, uint32_t *availableLen, ptx_NSC_RfDiscover_Param_Value_t *param, ptx_NSC_State_t *nextState)
 {
@@ -531,6 +543,7 @@ static ptx_Status_t ptx_NSC_ConfigureListenA(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx
     return status;
 }
 
+#if !defined(PTX_DISABLE_LISTEN_B)
 static ptx_Status_t ptx_NSC_ConfigureListenB(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params)
 {
     ptx_Status_t status = PTX_STATUS_E_GEN_INVALID_PARAMETER;
@@ -588,6 +601,7 @@ static ptx_Status_t ptx_NSC_ConfigureListenB(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx
 
     return status;
 }
+#endif
 
 static ptx_Status_t ptx_NSC_ConfigureListenF(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params)
 {
@@ -864,6 +878,7 @@ static ptx_Status_t ptx_NSC_SetDefaultDiscParams(ptx_NSC_RfDiscovery_Cfg_t *cfg,
                 break;
             }
 
+#if !defined(PTX_DISABLE_LISTEN_B)
             case NSC_RfDiscover_Param_Type_ListenB:
             {
                 ptx_NSC_RfDiscover_Param_Listen_B_t *listenBParams = &params->Value.ListenB;
@@ -879,6 +894,7 @@ static ptx_Status_t ptx_NSC_SetDefaultDiscParams(ptx_NSC_RfDiscovery_Cfg_t *cfg,
 
                 break;
             }
+#endif
 
             case NSC_RfDiscover_Param_Type_ListenF:
             {

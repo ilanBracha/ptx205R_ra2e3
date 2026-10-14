@@ -97,8 +97,12 @@ static ptx_Status_t ptx_NSC_ConfigurePoll(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NS
 static ptx_Status_t ptx_NSC_ConfigurePollAcm(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
 static ptx_Status_t ptx_NSC_ConfigurePollA(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
 static ptx_Status_t ptx_NSC_ConfigurePollB(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
+#if !defined(PTX_DISABLE_NDEF_T3T)
 static ptx_Status_t ptx_NSC_ConfigurePollF(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
+#endif
+#if !defined(PTX_DISABLE_NDEF_T5T)
 static ptx_Status_t ptx_NSC_ConfigurePollV(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
+#endif
 static ptx_Status_t ptx_NSC_ConfigurePollIsoDep(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
 static ptx_Status_t ptx_NSC_ConfigurePollNfcDep(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
 static ptx_Status_t ptx_NSC_SetDefaultDiscParams(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params);
@@ -131,12 +135,16 @@ ptx_Status_t ptx_NSC_GetRfDiscoveryParam_Poll(ptx_NSC_t *nsc, ptx_NSC_RfDiscover
             case NSC_RfDiscover_Param_Type_PollB:
                 status = ptx_NSC_ConfigurePollB(cfg, params);
                 break;
+#if !defined(PTX_DISABLE_NDEF_T3T)
             case NSC_RfDiscover_Param_Type_PollF:
                 status = ptx_NSC_ConfigurePollF(cfg, params);
                 break;
+#endif
+#if !defined(PTX_DISABLE_NDEF_T5T)
             case NSC_RfDiscover_Param_Type_PollV:
                 status = ptx_NSC_ConfigurePollV(cfg, params);
                 break;
+#endif
             case NSC_RfDiscover_Param_Type_PollIsoDep:
                 status = ptx_NSC_ConfigurePollIsoDep(cfg, params);
                 break;
@@ -357,6 +365,7 @@ ptx_Status_t ptx_NSC_ParamParser_PollB(uint8_t **bufferPos, uint32_t *availableL
     return status;
 }
 
+#if !defined(PTX_DISABLE_NDEF_T3T)
 ptx_Status_t ptx_NSC_ParamParser_PollF(uint8_t **bufferPos, uint32_t *availableLen, ptx_NSC_RfDiscover_Param_Value_t *param, ptx_NSC_State_t *nextState)
 {
     /* Prevent compiler unused-parameter warning */
@@ -410,7 +419,9 @@ ptx_Status_t ptx_NSC_ParamParser_PollF(uint8_t **bufferPos, uint32_t *availableL
     }
     return status;
 }
+#endif
 
+#if !defined(PTX_DISABLE_NDEF_T5T)
 ptx_Status_t ptx_NSC_ParamParser_PollV(uint8_t **bufferPos, uint32_t *availableLen, ptx_NSC_RfDiscover_Param_Value_t *param, ptx_NSC_State_t *nextState)
 {
     /* Prevent compiler unused-parameter warning */
@@ -446,6 +457,7 @@ ptx_Status_t ptx_NSC_ParamParser_PollV(uint8_t **bufferPos, uint32_t *availableL
     }
     return status;
 }
+#endif
 
 ptx_Status_t ptx_NSC_ParamParser_PollIsoDep(uint8_t **bufferPos, uint32_t *availableLen, ptx_NSC_RfDiscover_Param_Value_t *param, ptx_NSC_State_t *nextState)
 {
@@ -774,6 +786,7 @@ static ptx_Status_t ptx_NSC_ConfigurePollB(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_N
     return status;
 }
 
+#if !defined(PTX_DISABLE_NDEF_T3T)
 static ptx_Status_t ptx_NSC_ConfigurePollF(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params)
 {
     ptx_Status_t status = PTX_STATUS_E_GEN_INVALID_PARAMETER;
@@ -850,7 +863,9 @@ static ptx_Status_t ptx_NSC_ConfigurePollF(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_N
 
     return status;
 }
+#endif
 
+#if !defined(PTX_DISABLE_NDEF_T5T)
 static ptx_Status_t ptx_NSC_ConfigurePollV(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params)
 {
     ptx_Status_t status = PTX_STATUS_E_GEN_INVALID_PARAMETER;
@@ -899,6 +914,7 @@ static ptx_Status_t ptx_NSC_ConfigurePollV(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_N
 
     return status;
 }
+#endif
 
 static ptx_Status_t ptx_NSC_ConfigurePollIsoDep(ptx_NSC_RfDiscovery_Cfg_t *cfg, ptx_NSC_RfDiscover_Param_t *params)
 {
@@ -1068,6 +1084,7 @@ static ptx_Status_t ptx_NSC_SetDefaultDiscParams(ptx_NSC_RfDiscovery_Cfg_t *cfg,
                 break;
             }
 
+#if !defined(PTX_DISABLE_NDEF_T3T)
             case NSC_RfDiscover_Param_Type_PollF:
             {
                 ptx_NSC_RfDiscover_Param_Poll_F_t *pollFParams = &params->Value.PollF;
@@ -1095,7 +1112,9 @@ static ptx_Status_t ptx_NSC_SetDefaultDiscParams(ptx_NSC_RfDiscovery_Cfg_t *cfg,
 
                 break;
             }
+#endif
 
+#if !defined(PTX_DISABLE_NDEF_T5T)
             case NSC_RfDiscover_Param_Type_PollV:
             {
                 ptx_NSC_RfDiscover_Param_Poll_V_t *pollVParams = &params->Value.PollV;
@@ -1116,6 +1135,7 @@ static ptx_Status_t ptx_NSC_SetDefaultDiscParams(ptx_NSC_RfDiscovery_Cfg_t *cfg,
 
                 break;
             }
+#endif
 
             case NSC_RfDiscover_Param_Type_PollIsoDep:
             {

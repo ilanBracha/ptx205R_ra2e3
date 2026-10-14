@@ -144,17 +144,21 @@ ptx_Status_t ptx_RUL_InitiateDiscovery(ptx_RUL_t *rul, ptx_RUL_DiscoverConfig_t 
                     discoverParamsSize++;
                 }
 
+#if !defined(PTX_DISABLE_NDEF_T3T)   /* RA2E3 port: NFC-F only with T3T */
                 if (((0 != cfg->PollTypeF212) || (0 != cfg->PollTypeF424)) && (PTX_STATUS_SUCCESS == status))
                 {
                     status = ptx_NSC_GetRfDiscoveryParam(&(rul->Nsc), NSC_RfDiscover_Param_Type_PollF, &nsc_cfg, &discoverParams[discoverParamsSize]);
                     discoverParamsSize++;
                 }
+#endif
 
+#if !defined(PTX_DISABLE_NDEF_T5T)   /* RA2E3 port: NFC-V only with T5T */
                 if ((0 != cfg->PollTypeV) && (PTX_STATUS_SUCCESS == status))
                 {
                     status = ptx_NSC_GetRfDiscoveryParam(&(rul->Nsc), NSC_RfDiscover_Param_Type_PollV, &nsc_cfg, &discoverParams[discoverParamsSize]);
                     discoverParamsSize++;
                 }
+#endif
 
                 if (PTX_STATUS_SUCCESS == status)
                 {
@@ -183,11 +187,13 @@ ptx_Status_t ptx_RUL_InitiateDiscovery(ptx_RUL_t *rul, ptx_RUL_DiscoverConfig_t 
                     discoverParamsSize++;
                 }
 
+#if !defined(PTX_DISABLE_LISTEN_B)   /* RA2E3 port: no Listen NFC-B */
                 if ((0 != cfg->ListenTypeB) && (PTX_STATUS_SUCCESS == status))
                 {
                     status = ptx_NSC_GetRfDiscoveryParam(&(rul->Nsc), NSC_RfDiscover_Param_Type_ListenB, &nsc_cfg, &discoverParams[discoverParamsSize]);
                     discoverParamsSize++;
                 }
+#endif
 
                 if (((0 != cfg->ListenTypeF212) || (0 != cfg->ListenTypeF424)) && (PTX_STATUS_SUCCESS == status))
                 {

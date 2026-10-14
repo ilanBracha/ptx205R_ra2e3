@@ -148,12 +148,16 @@ ptx_Status_t ptx_NSC_RfDiscover(ptx_NSC_t *nsc, ptx_NSC_RfDiscover_Param_t *disc
                     case NSC_RfDiscover_Param_Type_PollB:
                         status = ptx_NSC_ParamParser_PollB(&nsc_buf_pos, &nsc_buf_free_len, &discoverParams[param_idx].Value, &disc_next_state);
                         break;
+#if !defined(PTX_DISABLE_NDEF_T3T)
                     case NSC_RfDiscover_Param_Type_PollF:
                         status = ptx_NSC_ParamParser_PollF(&nsc_buf_pos, &nsc_buf_free_len, &discoverParams[param_idx].Value, &disc_next_state);
                         break;
+#endif
+#if !defined(PTX_DISABLE_NDEF_T5T)
                     case NSC_RfDiscover_Param_Type_PollV:
                         status = ptx_NSC_ParamParser_PollV(&nsc_buf_pos, &nsc_buf_free_len, &discoverParams[param_idx].Value, &disc_next_state);
                         break;
+#endif
                     case NSC_RfDiscover_Param_Type_PollIsoDep:
                         status = ptx_NSC_ParamParser_PollIsoDep(&nsc_buf_pos, &nsc_buf_free_len, &discoverParams[param_idx].Value, &disc_next_state);
                         break;
@@ -174,11 +178,13 @@ ptx_Status_t ptx_NSC_RfDiscover(ptx_NSC_t *nsc, ptx_NSC_RfDiscover_Param_t *disc
                         status = ptx_NSC_ParamParser_ListenA(&nsc_buf_pos, &nsc_buf_free_len, &discoverParams[param_idx].Value, &disc_next_state);
                         break;
 #endif /* PTX_DISABLE_LISTEN_MODE*/
+#if !defined(PTX_DISABLE_LISTEN_B)
                     case NSC_RfDiscover_Param_Type_ListenB:
 #if !defined(PTX_DISABLE_LISTEN_MODE)
                         status = ptx_NSC_ParamParser_ListenB(&nsc_buf_pos, &nsc_buf_free_len, &discoverParams[param_idx].Value, &disc_next_state);
                         break;
 #endif /* PTX_DISABLE_LISTEN_MODE*/
+#endif
                     case NSC_RfDiscover_Param_Type_ListenF:
 #if !defined(PTX_DISABLE_LISTEN_MODE)
                         status = ptx_NSC_ParamParser_ListenF(&nsc_buf_pos, &nsc_buf_free_len, &discoverParams[param_idx].Value, &disc_next_state);
